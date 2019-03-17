@@ -47,7 +47,7 @@ namespace CopyCameraCards
             }
         }
 
-        public static string GetLabelForDrive(string drive)
+        public static string GetLabelForDrive(string drive, bool setToRandomIfEmptynewLabel = false)
         {
             var result = "";
             var driveFound = false;
@@ -60,6 +60,13 @@ namespace CopyCameraCards
                     if (d.IsReady)
                     {
                         result = d.VolumeLabel;
+
+                        if (string.IsNullOrWhiteSpace(result))
+                        {
+                            var newVolume = new Random().Next(0, int.MaxValue);
+
+                            d.VolumeLabel = newVolume.ToString();
+                        }
                     }
                     else
                     {
@@ -83,6 +90,10 @@ namespace CopyCameraCards
             TotalFilesFound = 0;
             TotalMatchingFilesFound = 0;
 
+            // Set volume label if empty
+            var label = GetLabelForDrive(startFolder, true);
+
+            // init regex pattern
             var r = "(";
             foreach (var item in pattern)
             {
@@ -93,10 +104,10 @@ namespace CopyCameraCards
 
             Pattern = r;
 
-            DirSearch(startFolder, pattern);
+            DirSearch(startFolder);
         }
 
-        private void DirSearch(string startFolder, string[] pattern)
+        private void DirSearch(string startFolder)
         {
             RegexOptions options = RegexOptions.Multiline | RegexOptions.IgnoreCase;
 
@@ -121,7 +132,7 @@ namespace CopyCameraCards
                 }
 
                 // Recurse
-                DirSearch(d, pattern);
+                DirSearch(d);
             }
         }
 
