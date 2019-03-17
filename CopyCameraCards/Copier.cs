@@ -4,6 +4,7 @@ using System.Diagnostics;
 using System.IO;
 using System.Linq;
 using System.Text;
+using System.Text.RegularExpressions;
 using System.Threading.Tasks;
 
 namespace CopyCameraCards
@@ -12,6 +13,12 @@ namespace CopyCameraCards
     {
         public string fromDrive { get; set; }
         public string toDrive { get; set; }
+        public string Pattern { get; set; }
+
+        public int TotalFilesFound = 0;
+        public int TotalMatchingFilesFound = 0;
+
+        public IList<string> ExtensionsFound { get; set; } = new List<string>();
 
         public Copier(string fromDrive, string toDrive)
         {
@@ -67,6 +74,78 @@ namespace CopyCameraCards
             }
 
             return result;
+        }
+
+        public void RunSearch(string startFolder, string[] pattern)
+        {
+            ExtensionsFound = new List<string>();
+
+            TotalFilesFound = 0;
+            TotalMatchingFilesFound = 0;
+
+            var r = "(";
+            foreach (var item in pattern)
+            {
+                r += item + "|";
+            }
+            r = r.TrimEnd('|');
+            r += ")";
+
+            Pattern = r;
+
+            DirSearch(startFolder, pattern);
+        }
+
+        private void DirSearch(string startFolder, string[] pattern)
+        {
+            RegexOptions options = RegexOptions.Multiline | RegexOptions.IgnoreCase;
+
+            foreach (string d in Directory.GetDirectories(startFolder))
+            {
+                foreach (string file in Directory.GetFiles(d))
+                {
+                    TotalFilesFound++;
+
+                    foreach (Match m in Regex.Matches(file, Pattern, options))
+                    {
+                        TotalMatchingFilesFound++;
+                        //Trace.WriteLine(string.Format("'{0}' found at index {1}.", m.Value, m.Index));
+                        HandleFile(file);
+                    }
+
+                    var ext = Path.GetExtension(file);
+                    if (ExtensionsFound.Contains(ext) == false)
+                    {
+                        ExtensionsFound.Add(ext);
+                    }
+                }
+
+                // Recurse
+                DirSearch(d, pattern);
+            }
+        }
+
+        public void HandleFile(string filename)
+        {
+            //Trace.WriteLine(string.Format("'{0}' found.", filename));
+        }
+
+        public override string ToString()
+        {
+            var result = new StringBuilder();
+
+            result.AppendLine("[" + this.GetType().Name + "]");
+            result.AppendLine("Pattern: " + Pattern);
+            result.AppendLine("TotalFilesFound: " + TotalFilesFound);
+            result.AppendLine("TotalMatchingFilesFound: " + TotalMatchingFilesFound);
+            //result.AppendLine(": " + TotalFilesFound);
+            result.AppendLine("ExtensionsFound:");
+            foreach (var item in ExtensionsFound)
+            {
+                result.AppendLine("  " + item);
+            }
+
+            return result.ToString();
         }
     }
 }
