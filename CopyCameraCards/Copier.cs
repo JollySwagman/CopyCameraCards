@@ -11,21 +11,37 @@ namespace CopyCameraCards
 {
     public class Copier
     {
-        public string fromDrive { get; set; }
-        public string toDrive { get; set; }
+        private static RegexOptions options = RegexOptions.Multiline | RegexOptions.IgnoreCase;
+
+        public string FromDrive { get; set; }
+        public string ToDrive { get; set; }
         public string Pattern { get; set; }
+        public string FromVolume { get; set; }
 
         public int TotalFilesFound = 0;
+        public long TotalBytesFound = 0;
+        public long TotalMatchingBytesFound = 0;
         public int TotalMatchingFilesFound = 0;
 
         public IList<string> ExtensionsFound { get; set; } = new List<string>();
 
+        public int Megabyte = 1048576;
+        public int Gigabyte = 1073741824;
+
         public Copier(string fromDrive, string toDrive)
         {
-        }
+            if (string.IsNullOrWhiteSpace(fromDrive))
+            {
+                throw new ArgumentNullException("fromDrive");
+            }
 
-        public static void CopyAll(string fromDrive, string toDrive, ICollection<string> types)
-        {
+            if (string.IsNullOrWhiteSpace(toDrive))
+            {
+                throw new ArgumentNullException("toDrive");
+            }
+
+            FromDrive = fromDrive;
+            ToDrive = toDrive;
         }
 
         public static void DrivInfo()
@@ -47,7 +63,7 @@ namespace CopyCameraCards
             }
         }
 
-        public static string GetLabelForDrive(string drive, bool setToRandomIfEmptynewLabel = false)
+        public string GetLabelForDrive(string drive, bool setToRandomIfEmptynewLabel = false)
         {
             var result = "";
             var driveFound = false;
@@ -57,6 +73,12 @@ namespace CopyCameraCards
                 if (d.Name == drive)
                 {
                     driveFound = true;
+
+                    if (d.DriveType != DriveType.Removable)
+                    {
+                        throw new ArgumentException("Drive " + drive + " not removable.");
+                    }
+
                     if (d.IsReady)
                     {
                         result = d.VolumeLabel;
@@ -80,11 +102,19 @@ namespace CopyCameraCards
                 throw new ArgumentException("Drive " + drive + " not found.");
             }
 
+            FromVolume = result;
+
             return result;
         }
 
-        public void RunSearch(string startFolder, string[] pattern)
+        public void RunSearch(string startFolder, string[] pattern, string moveTo)
         {
+            var destination = new DirectoryInfo(moveTo);
+            if (destination.Exists == false)
+            {
+                destination.Create();
+            }
+
             ExtensionsFound = new List<string>();
 
             TotalFilesFound = 0;
@@ -94,51 +124,93 @@ namespace CopyCameraCards
             var label = GetLabelForDrive(startFolder, true);
 
             // init regex pattern
-            var r = "(";
-            foreach (var item in pattern)
-            {
-                r += item + "|";
-            }
-            r = r.TrimEnd('|');
-            r += ")";
 
-            Pattern = r;
+            Pattern = Helper.MakeRegexFromPattern(pattern);
 
-            DirSearch(startFolder);
+            DirSearch(startFolder, destination);
         }
 
-        private void DirSearch(string startFolder)
+        /// <summary>
+        ///
+        /// </summary>
+        /// <param name="startFolder"></param>
+        /// <param name="destination"></param>
+        private void DirSearch(string startFolder, DirectoryInfo destination)
         {
-            RegexOptions options = RegexOptions.Multiline | RegexOptions.IgnoreCase;
-
             foreach (string d in Directory.GetDirectories(startFolder))
             {
                 foreach (string file in Directory.GetFiles(d))
                 {
+                    // Housekeeping
                     TotalFilesFound++;
+                    UpdateExtensionList(file);
+                    TotalBytesFound += new FileInfo(file).Length;
 
-                    foreach (Match m in Regex.Matches(file, Pattern, options))
+                    if (IsFilenameExtensionMatch(file, Pattern))
                     {
-                        TotalMatchingFilesFound++;
-                        //Trace.WriteLine(string.Format("'{0}' found at index {1}.", m.Value, m.Index));
-                        HandleFile(file);
-                    }
-
-                    var ext = Path.GetExtension(file);
-                    if (ExtensionsFound.Contains(ext) == false)
-                    {
-                        ExtensionsFound.Add(ext);
+                        HandleMatchedFile(file, destination);
                     }
                 }
 
                 // Recurse
-                DirSearch(d);
+                DirSearch(d, destination);
             }
         }
 
-        public void HandleFile(string filename)
+        /// <summary>
+        ///
+        /// </summary>
+        /// <param name="file"></param>
+        /// <param name="pattern"></param>
+        /// <returns></returns>
+        public static bool IsFilenameExtensionMatch(string file, string pattern)
         {
-            //Trace.WriteLine(string.Format("'{0}' found.", filename));
+            var ext = Path.GetExtension(file);
+
+            var result = false;
+            foreach (Match m in Regex.Matches(ext, pattern, options))
+            {
+                result = true;
+            }
+            return result;
+        }
+
+        /// <summary>
+        ///
+        /// </summary>
+        /// <param name="file"></param>
+        public void UpdateExtensionList(string file)
+        {
+            var ext = Path.GetExtension(file);
+            if (ExtensionsFound.Contains(ext) == false)
+            {
+                ExtensionsFound.Add(ext);
+            }
+        }
+
+        public void HandleMatchedFile(string filename, DirectoryInfo destination)
+        {
+            var originalFile = new FileInfo(filename);
+            TotalMatchingBytesFound += originalFile.Length;
+            TotalMatchingFilesFound++;
+
+            var newpath = new FileInfo(filename).FullName.Replace(FromDrive, "");
+
+            var destinationSpec = Path.Combine(this.ToDrive, "VOL_" + FromVolume, newpath);
+
+            Trace.WriteLine("Copying to " + destinationSpec);
+
+            var fi = new FileInfo(destinationSpec);
+            if (fi.Directory.Exists == false)
+            {
+                fi.Directory.Create();
+            }
+
+            // This is it
+            if (new FileInfo(destinationSpec).Exists == false)
+            {
+                File.Copy(filename, destinationSpec);
+            }
         }
 
         public override string ToString()
@@ -149,6 +221,17 @@ namespace CopyCameraCards
             result.AppendLine("Pattern: " + Pattern);
             result.AppendLine("TotalFilesFound: " + TotalFilesFound);
             result.AppendLine("TotalMatchingFilesFound: " + TotalMatchingFilesFound);
+
+            result.AppendLine("TotalBytesFound: " + TotalBytesFound);
+            result.AppendLine("TotalMegabytesFound: " + TotalBytesFound / Megabyte);
+            result.AppendLine("TotalGigabytesFound: " + TotalBytesFound / Gigabyte);
+
+            result.AppendLine("TotalMatchingBytesFound: " + TotalMatchingBytesFound);
+            result.AppendLine("TotalMatchingMegabytesFound: " + TotalMatchingBytesFound / Megabyte);
+            result.AppendLine("TotalMatchingGigabytesFound: " + TotalMatchingBytesFound / Gigabyte);
+
+            //result.AppendLine(": " + TotalFilesFound);
+            //result.AppendLine(": " + TotalFilesFound);
             //result.AppendLine(": " + TotalFilesFound);
             result.AppendLine("ExtensionsFound:");
             foreach (var item in ExtensionsFound)
